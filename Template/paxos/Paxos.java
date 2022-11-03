@@ -117,17 +117,17 @@ public class Paxos implements PaxosRMI, Runnable{
     // RMI handler
     public Response Prepare(Request req){
         // your code here
-
+        return new Response();
     }
 
     public Response Accept(Request req){
         // your code here
-
+        return new Response();
     }
 
     public Response Decide(Request req){
         // your code here
-
+        return new Response();
     }
 
     /**
@@ -148,6 +148,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Max(){
         // Your code here
+        return 10;
     }
 
     /**
@@ -180,7 +181,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Min(){
         // Your code here
-
+        return 1;
     }
 
 
@@ -194,7 +195,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public retStatus Status(int seq){
         // Your code here
-
+        return new retStatus(null, dead);
     }
 
     /**
@@ -238,5 +239,8 @@ public class Paxos implements PaxosRMI, Runnable{
         return this.unreliable.get();
     }
 
+    public static void main(String... args) {
+        System.out.println("Hello World");
+    }
 
 }
