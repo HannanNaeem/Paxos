@@ -83,10 +83,10 @@ public class PaxosTest {
         final int npaxos = 5;
         Paxos[] pxa = initPaxos(npaxos);
 
-        System.out.println("Test: Single proposer ...");
-        pxa[0].Start(0, "hello");
-        waitn(pxa, 0, npaxos);
-        System.out.println("... Passed");
+        // System.out.println("Test: Single proposer ...");
+        // pxa[0].Start(0, "hello");
+        // waitn(pxa, 0, npaxos);
+        // System.out.println("... Passed");
 
 
         // System.out.println("Test: Many proposers, same value ...");
@@ -103,28 +103,28 @@ public class PaxosTest {
         // waitn(pxa, 2, npaxos);
         // System.out.println("... Passed");
 
-        // System.out.println("Test: Out-of-order instances ...");
-        // pxa[0].Start(7, 700);
-        // try {
-        //     Thread.sleep(10);
-        // } catch (Exception e){
-        //     e.printStackTrace();
-        // }
-        // pxa[0].Start(6, 600);
-        // pxa[1].Start(5, 500);
-        // waitn(pxa, 7, npaxos);
-        // pxa[0].Start(4, 400);
-        // pxa[1].Start(3, 300);
-        // waitn(pxa, 6, npaxos);
-        // waitn(pxa, 5, npaxos);
-        // waitn(pxa, 4, npaxos);
-        // waitn(pxa, 3, npaxos);
-        // System.out.println("... Passed");
+        System.out.println("Test: Out-of-order instances ...");
+        pxa[0].Start(7, 700);
+        try {
+            Thread.sleep(10);
+        } catch (Exception e){
+            e.printStackTrace();
+        }
+        pxa[0].Start(6, 600);
+        pxa[1].Start(5, 500);
+        waitn(pxa, 7, npaxos);
+        pxa[0].Start(4, 400);
+        pxa[1].Start(3, 300);
+        waitn(pxa, 6, npaxos);
+        waitn(pxa, 5, npaxos);
+        waitn(pxa, 4, npaxos);
+        waitn(pxa, 3, npaxos);
+        System.out.println("... Passed");
         cleanup(pxa);
 
     }
 
-    @Test
+    // @Test
     public void TestDeaf(){
 
         final int npaxos = 5;
@@ -163,7 +163,7 @@ public class PaxosTest {
 
     }
 
-    @Test
+    // @Test
     public void TestForget(){
 
         final int npaxos = 6;

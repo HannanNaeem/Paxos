@@ -10,7 +10,25 @@ import java.io.Serializable;
 public class Request implements Serializable {
     static final long serialVersionUID=1L;
     // Your data here
-
+    Integer seq;
+    Integer prop;
+    Integer initiator;
+    Object value;
 
     // Your constructor and methods here
+
+    Request(Integer seq, Integer prop, Integer initiator, Object val) {
+        this.seq = seq;
+        this.prop = prop;
+        this.initiator = initiator;
+        this.value = val;
+    }
+
+    Request(Object value) {
+        this.value = value;
+    }
+
+    public String toString() {
+        return "PROP: " + this.prop + " INITIATOR: " + this.initiator + " value: " + this.value;
+    }
 }

@@ -1,14 +1,43 @@
 package paxos;
+import java.io.ObjectInputFilter.Status;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
+import javax.sound.midi.Sequence;
+import javax.sql.rowset.serial.SerialArray;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+
 /**
  * This class is the main class you need to implement paxos instances.
  */
-public class Paxos implements PaxosRMI, Runnable{
+
+class SequenceData {
+    Object value;
+    Integer initiator;
+    Integer prop;
+
+    SequenceData(Object value, Integer initiator, Integer prop) {
+        this.value = value;
+        this.initiator = initiator;
+        this.prop = prop;
+    }
+
+    public void update(Object value, Integer initiator, Integer prop) {
+        this.value = value;
+        this.initiator = initiator;
+        this.prop = prop;
+    }
+
+    public String toString() {
+        return "Val: " + this.value + " initiator: " + this.initiator + " Prop: " + this.prop;
+    }
+}
+public class Paxos implements PaxosRMI, Runnable {
 
     ReentrantLock mutex;
     String[] peers; // hostname
@@ -22,6 +51,16 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean unreliable;// for testing
 
     // Your data here
+
+    HashMap<Integer, SequenceData> SequencePrepMap;
+    HashMap<Integer, SequenceData> SequenceAcceptMap;
+    HashMap<Integer, retStatus> DecidedValMap;
+
+    int seq;
+    Object value;
+
+    State d_status;
+    Object d_val;
 
 
     /**
@@ -40,6 +79,11 @@ public class Paxos implements PaxosRMI, Runnable{
 
         // Your initialization code here
 
+        SequencePrepMap = new HashMap<Integer, SequenceData>(); 
+        SequenceAcceptMap = new HashMap<Integer, SequenceData>(); 
+        DecidedValMap = new HashMap<Integer, retStatus>();
+
+
 
         // register peers, do not modify this part
         try{
@@ -50,6 +94,7 @@ public class Paxos implements PaxosRMI, Runnable{
         } catch(Exception e){
             e.printStackTrace();
         }
+        System.out.println(me);
     }
 
 
@@ -107,27 +152,118 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
+        this.seq = seq;
+        this.value = value;
+        Thread pt = new Thread(this);
+        pt.start();
     }
 
     @Override
     public void run(){
         //Your code here
+        mutex.lock();
+        SequenceData s = SequencePrepMap.getOrDefault(this.seq, null);
+        if (s == null) {
+            s = new SequenceData(null, this.me, -1);
+            SequencePrepMap.put(this.seq, s);
+        }
+        int prop_number = s.prop + 1;
+        mutex.unlock();
+
+        SequenceData temp_max = new SequenceData(this.value, this.me, prop_number);
+
+        int count = 0;
+        for (int i = 0; i < this.peers.length; i++) {
+            Response res = Call("Prepare", new Request(this.seq, prop_number, this.me, this.value), i);
+
+            if (res == null) {
+                continue;
+            } else if (res.max_prop > temp_max.prop || (res.max_prop == temp_max.prop && res.initiator > temp_max.initiator)) {
+                temp_max.update(res.max_val, res.initiator, res.max_prop);
+            }
+            count++;
+        }
+
+
+        if (count <= (this.peers.length/2)) {
+            System.out.println("Majority declined!");
+            return;
+        }
+
+        // Here we have some value in temp max > could me mine or someone else's
+        count = 0;
+
+        // send accept to all for this value with the same proposal number
+
+        for (int i = 0; i < this.peers.length; i++) {
+            Response res = Call("Accept", new Request(this.seq, prop_number, this.me, temp_max.value), i);
+
+            if (res == null) {
+                continue;
+            }
+            count++;
+        }
+
+        if (count <= (this.peers.length/2)) {
+            System.out.println("Majority declined!");
+            return;
+        }
+
+        count = 0;
+
+        for (int i = 0; i < this.peers.length; i++) {
+            Response res = Call("Decide", new Request(this.seq, prop_number, this.me, temp_max.value), i);
+
+            if (res == null) {
+                continue;
+            }
+            count++;
+        }
+
+        System.out.println("Majority accepted");
+
     }
 
     // RMI handler
     public Response Prepare(Request req){
         // your code here
-        return new Response();
-    }
+        System.out.println("PREPARE: " + req);
 
+        SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
+
+        if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator > prep_max.initiator)) {
+            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+
+            SequenceData accept_max = SequenceAcceptMap.getOrDefault(req.seq, null);
+
+            if (accept_max == null) {
+                return new Response(req.prop, -1, -1, null);
+            }
+            return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value);
+        }
+        // prepare reject
+        return new Response(req.prop, prep_max.prop, prep_max.initiator, prep_max.value);
+        
+    }
+    
     public Response Accept(Request req){
-        // your code here
-        return new Response();
+        SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
+
+        if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator >= prep_max.initiator)) {
+            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+            SequenceAcceptMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+            return new Response(req.prop);
+        }
+        // accept_reject
+        return new Response(req.prop);
     }
 
     public Response Decide(Request req){
         // your code here
-        return new Response();
+        DecidedValMap.put(req.seq, new retStatus(State.Decided, req.value));
+
+        // add to dict
+        return new Response(req.prop);
     }
 
     /**
@@ -194,8 +330,9 @@ public class Paxos implements PaxosRMI, Runnable{
      * it should not contact other Paxos peers.
      */
     public retStatus Status(int seq){
-        // Your code here
-        return new retStatus(null, dead);
+        // Your code 
+    
+        return DecidedValMap.getOrDefault(seq, new retStatus(State.Pending, null));
     }
 
     /**
@@ -239,8 +376,26 @@ public class Paxos implements PaxosRMI, Runnable{
         return this.unreliable.get();
     }
 
+    public static Paxos[] initPaxos(int npaxos){
+        String host = "127.0.0.1";
+        String[] peers = new String[npaxos];
+        int[] ports = new int[npaxos];
+        Paxos[] pxa = new Paxos[npaxos];
+        for(int i = 0 ; i < npaxos; i++){
+            ports[i] = 1100+i;
+            peers[i] = host;
+        }
+        for(int i = 0; i < npaxos; i++){
+            pxa[i] = new Paxos(i, peers, ports);
+        }
+        return pxa;
+    }
+
     public static void main(String... args) {
         System.out.println("Hello World");
+        Paxos[] ps = initPaxos(5);
+
+        ps[0].Start(0, "hello");
     }
 
 }
