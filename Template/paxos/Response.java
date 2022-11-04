@@ -14,6 +14,8 @@ public class Response implements Serializable {
     int initiator;
     Object max_val;
 
+    boolean accept;
+
     // Your constructor and methods here
 
     Response(int prop, int max_prop, int initiator, Object max_val) {
@@ -21,10 +23,24 @@ public class Response implements Serializable {
         this.max_prop = max_prop;
         this.initiator = initiator;
         this.max_val = max_val;
+        this.accept = true;
+    }
+
+    Response(int prop, int max_prop, int initiator, Object max_val, boolean accept) {
+        this.prop = prop;
+        this.max_prop = max_prop;
+        this.initiator = initiator;
+        this.max_val = max_val;
+        this.accept = accept;
     }
 
     Response(int prop) {
         this.prop = prop;
+        accept = true;
+    }
+    
+    Response(boolean accept) {
+        this.accept = false;
     }
 
     public String toString() {
