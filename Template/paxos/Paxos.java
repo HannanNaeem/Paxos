@@ -18,16 +18,16 @@ import java.util.HashMap;
 
 class SequenceData {
     Object value;
-    Integer initiator;
-    Integer prop;
+    int initiator;
+    int prop;
 
-    SequenceData(Object value, Integer initiator, Integer prop) {
+    SequenceData(Object value, int initiator, int prop) {
         this.value = value;
         this.initiator = initiator;
         this.prop = prop;
     }
 
-    public void update(Object value, Integer initiator, Integer prop) {
+    public void update(Object value, int initiator, int prop) {
         this.value = value;
         this.initiator = initiator;
         this.prop = prop;
@@ -169,7 +169,6 @@ public class Paxos implements PaxosRMI, Runnable {
         }
         int prop_number = s.prop + 1;
         mutex.unlock();
-
         SequenceData temp_max = new SequenceData(this.value, this.me, prop_number);
 
         int count = 0;
@@ -178,8 +177,21 @@ public class Paxos implements PaxosRMI, Runnable {
 
             if (res == null) {
                 continue;
-            } else if (res.max_prop > temp_max.prop || (res.max_prop == temp_max.prop && res.initiator > temp_max.initiator)) {
-                temp_max.update(res.max_val, res.initiator, res.max_prop);
+            } else {
+                // if (this.me == 0) {
+
+                //     System.out.println(res.max_prop > temp_max.prop);
+                //     System.out.println(res.max_prop == temp_max.prop);
+                //     System.out.println(res.max_prop + " " + temp_max.prop);
+                //     System.out.println(res.initiator > temp_max.initiator);
+                // }
+                if (res.max_prop > temp_max.prop || (res.max_prop == temp_max.prop && res.initiator > temp_max.initiator)) {
+                    temp_max.update(res.max_val, res.initiator, res.max_prop);
+                }
+                // if (this.me == 0) {
+                //     System.out.println(res);
+                //     System.out.println(temp_max);
+                // }
             }
             count++;
         }
@@ -197,13 +209,13 @@ public class Paxos implements PaxosRMI, Runnable {
 
         for (int i = 0; i < this.peers.length; i++) {
             Response res = Call("Accept", new Request(this.seq, prop_number, this.me, temp_max.value), i);
-
             if (res == null) {
                 continue;
             }
+            System.out.println("Initiator: " + this.me + " PROP no: " + prop_number + " Acceptance from: " + i + " for SEQ: " + this.seq + " for val: " + temp_max.value);
             count++;
         }
-
+        System.out.println(temp_max);
         if (count <= (this.peers.length/2)) {
             System.out.println("Majority declined!");
             return;
@@ -227,40 +239,46 @@ public class Paxos implements PaxosRMI, Runnable {
     // RMI handler
     public Response Prepare(Request req){
         // your code here
-        System.out.println("PREPARE: " + req);
-
+        mutex.lock();
         SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
 
         if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator > prep_max.initiator)) {
             SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
 
             SequenceData accept_max = SequenceAcceptMap.getOrDefault(req.seq, null);
-
+            mutex.unlock();
             if (accept_max == null) {
                 return new Response(req.prop, -1, -1, null);
             }
             return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value);
         }
+        mutex.unlock();
         // prepare reject
         return new Response(req.prop, prep_max.prop, prep_max.initiator, prep_max.value);
         
     }
     
-    public Response Accept(Request req){
+    public Response Accept(Request req) {
+        mutex.lock();
         SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
 
         if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator >= prep_max.initiator)) {
             SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
             SequenceAcceptMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+            mutex.unlock();
             return new Response(req.prop);
         }
         // accept_reject
+        mutex.unlock();
         return new Response(req.prop);
     }
 
     public Response Decide(Request req){
         // your code here
-        DecidedValMap.put(req.seq, new retStatus(State.Decided, req.value));
+        mutex.lock();
+        if (!DecidedValMap.containsKey(req.seq))
+            DecidedValMap.put(req.seq, new retStatus(State.Decided, req.value));
+        mutex.unlock();
 
         // add to dict
         return new Response(req.prop);
@@ -331,8 +349,10 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public retStatus Status(int seq){
         // Your code 
-    
-        return DecidedValMap.getOrDefault(seq, new retStatus(State.Pending, null));
+        mutex.lock();
+        retStatus r = DecidedValMap.getOrDefault(seq, new retStatus(State.Pending, null));
+        mutex.unlock();
+        return r;
     }
 
     /**
