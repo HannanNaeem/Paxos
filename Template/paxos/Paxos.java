@@ -20,21 +20,26 @@ class SequenceData {
     Object value;
     int initiator;
     int prop;
+    boolean isDecided;
 
-    SequenceData(Object value, int initiator, int prop) {
+    SequenceData(Object value, int initiator, int prop, boolean isDecided) {
         this.value = value;
         this.initiator = initiator;
         this.prop = prop;
+        this.isDecided = isDecided;
     }
 
-    public void update(Object value, int initiator, int prop) {
+    public void update(Object value, int initiator, int prop, boolean isDecided) {
+        if (this.isDecided) return;
+
         this.value = value;
         this.initiator = initiator;
         this.prop = prop;
+        this.isDecided = isDecided;
     }
 
     public String toString() {
-        return "Val: " + this.value + " initiator: " + this.initiator + " Prop: " + this.prop;
+        return "*SEQUENCEDATA* Val: " + this.value + " initiator: " + this.initiator + " Prop: " + this.prop;
     }
 }
 public class Paxos implements PaxosRMI, Runnable {
@@ -171,12 +176,15 @@ public class Paxos implements PaxosRMI, Runnable {
             mutex.lock();
             SequenceData s = SequencePrepMap.getOrDefault(seq_cp, null);
             if (s == null) {
-                s = new SequenceData(null, this.me, -1);
+                s = new SequenceData(null, this.me, -1, false);
                 SequencePrepMap.put(seq_cp, s);
             }
+            // System.out.println(s);
             int prop_number = s.prop + 1;
             mutex.unlock();
-            SequenceData temp_max = new SequenceData(val_cp, this.me, prop_number);
+            SequenceData temp_max = new SequenceData(val_cp, this.me, prop_number, false);
+
+            boolean someonDecided = false;
 
             int count = 0;
             for (int i = 0; i < this.peers.length; i++) {
@@ -184,10 +192,14 @@ public class Paxos implements PaxosRMI, Runnable {
 
                 if (res == null) {
                     continue;
-                } else if (res.accept == false) {
+                }
 
-                    SequencePrepMap.put(seq_cp, new SequenceData(res.max_val, res.initiator, res.max_prop));
-                    temp_max.update(res.max_val, res.initiator, res.max_prop);
+                someonDecided = res.isDecided || someonDecided;
+                
+                if (res.accept == false) {
+                    SequencePrepMap.put(seq_cp, new SequenceData(res.max_val, res.initiator, res.max_prop, res.isDecided));
+                    temp_max.update(res.max_val, res.initiator, res.max_prop, res.isDecided);
+                    continue;
                 } else {
                     // if (this.me == 0) {
 
@@ -197,45 +209,47 @@ public class Paxos implements PaxosRMI, Runnable {
                     //     System.out.println(res.initiator > temp_max.initiator);
                     // }
                     if (res.max_prop > temp_max.prop || (res.max_prop == temp_max.prop && res.initiator > temp_max.initiator)) {
-                        temp_max.update(res.max_val, res.initiator, res.max_prop);
+                        temp_max.update(res.max_val, res.initiator, res.max_prop, res.isDecided);
                     }
-                    // if (this.me == 0) {
-                    //     System.out.println(res);
-                    //     System.out.println(temp_max);
-                    // }
+                    if (this.me == 0){
+                        // System.out.println(res);
+                        // System.out.println(temp_max);
+                    }
                 }
                 count++;
             }
 
-            if (count <= (this.peers.length/2)) {
-                // System.out.println("Majority declined!");
-                continue;
-            }
-
-            // Here we have some value in temp max > could me mine or someone else's
-            count = 0;
-
-            // send accept to all for this value with the same proposal number
-
-            for (int i = 0; i < this.peers.length; i++) {
-                Response res = Call("Accept", new Request(seq_cp, prop_number, this.me, temp_max.value), i);
-                if (res == null || !res.accept) {
+            if (!someonDecided) {
+                if (count <= (this.peers.length/2)) {
                     continue;
                 }
-                // System.out.println("Initiator: " + this.me + " PROP no: " + prop_number + " Acceptance from: " + i + " for SEQ: " + seq_cp + " for val: " + temp_max.value);
-                count++;
-            }
-
-            // System.out.println(temp_max);
-            if (count <= (this.peers.length/2)) {
-                // System.out.println("Majority declined!");
-                continue;
+    
+                // Here we have some value in temp max > could me mine or someone else's
+                count = 0;
+    
+                // send accept to all for this value with the same proposal number
+    
+                for (int i = 0; i < this.peers.length; i++) {
+                    Response res = Call("Accept", new Request(seq_cp, prop_number, this.me, temp_max.value), i);
+                    if (res == null || !res.accept) {
+                        continue;
+                    }
+                    // System.out.println("Initiator: " + this.me + " PROP no: " + prop_number + " Acceptance from: " + i + " for SEQ: " + seq_cp + " for val: " + temp_max.value);
+                    count++;
+                }
+    
+                if (count <= (this.peers.length/2)) {
+                    continue;
+                }
             }
 
             count = 0;
             // System.out.println("SEQ: " + seq_cp + " VAL: " + val_cp + " ME: " + this.me + " temp_max: " + temp_max.value);
-            // System.out.println(this.me + " DECIDED on val: " + val_cp + " seq: " + seq_cp);
+            // System.out.println(this.me + " DECIDED on val: " + temp_max.value + " seq: " + seq_cp + " LEN: " + this.peers.length);
             for (int i = 0; i < this.peers.length; i++) {
+                if (i == this.me) { 
+                    Decide(new Request(seq_cp, prop_number, this.me, temp_max.value));
+                }
                 Response res = Call("Decide", new Request(seq_cp, prop_number, this.me, temp_max.value), i);
 
                 if (res == null) {
@@ -244,10 +258,8 @@ public class Paxos implements PaxosRMI, Runnable {
                 count++;
             }
 
-            // System.out.println("Majority accepted");
             mutex.lock();
             decidedStatus = DecidedValMap.getOrDefault(seq_cp, null);
-            // System.out.println(decidedStatus.state + "  "   + this.me);
             mutex.unlock();
         }
 
@@ -258,43 +270,44 @@ public class Paxos implements PaxosRMI, Runnable {
         // your code here
         mutex.lock();
         SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
-        retStatus ret = DecidedValMap.getOrDefault(req.seq, null);
+        boolean isDecided = DecidedValMap.getOrDefault(req.seq, new retStatus(State.Pending, null)).state == State.Decided;
 
-        if ((ret != null && ret.state == State.Decided) || prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator > prep_max.initiator)) {
-            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+        if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator > prep_max.initiator)) {
+            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
 
             SequenceData accept_max = SequenceAcceptMap.getOrDefault(req.seq, null);
             mutex.unlock();
             if (accept_max == null) {
-                return new Response(req.prop, -1, -1, null);
+                return new Response(req.prop, -1, -1, null, true, isDecided);
             }
-            return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value);
+            return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value, true, isDecided);
         }
         mutex.unlock();
 
         // prepare reject
-        return new Response(req.prop, prep_max.prop, prep_max.initiator, prep_max.value, false);
+        return new Response(req.prop, prep_max.prop, prep_max.initiator, prep_max.value, false, isDecided);
         
     }
     
     public Response Accept(Request req) {
         mutex.lock();
         SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
-        retStatus ret = DecidedValMap.getOrDefault(req.seq, null);
+        boolean isDecided = DecidedValMap.getOrDefault(req.seq, new retStatus(State.Pending, null)).state == State.Decided;
 
-        if ((ret != null && ret.state == State.Decided) || prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator >= prep_max.initiator)) {
-            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
-            SequenceAcceptMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop));
+        if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator >= prep_max.initiator)) {
+            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
+            SequenceAcceptMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
             mutex.unlock();
-            return new Response(req.prop);
+            return new Response(req.prop, true, isDecided);
         }
         // accept_reject
         mutex.unlock();
-        return new Response(false);
+        return new Response(req.prop, false, isDecided);
     }
 
     public Response Decide(Request req){
         // your code here
+        
         mutex.lock();
         if (!DecidedValMap.containsKey(req.seq)) {
             // System.out.println("Deciding: " + req.value + " on SEQ: " + req.seq + " Me: " + this.me);
@@ -303,7 +316,7 @@ public class Paxos implements PaxosRMI, Runnable {
         mutex.unlock();
 
         // add to dict
-        return new Response(req.prop);
+        return new Response(req.prop, true, true);
     }
 
     /**

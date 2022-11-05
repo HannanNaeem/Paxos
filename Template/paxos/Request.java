@@ -29,6 +29,6 @@ public class Request implements Serializable {
     }
 
     public String toString() {
-        return "PROP: " + this.prop + " INITIATOR: " + this.initiator + " value: " + this.value;
+        return "*REQUEST* PROP: " + this.prop + " INITIATOR: " + this.initiator + " value: " + this.value;
     }
 }
