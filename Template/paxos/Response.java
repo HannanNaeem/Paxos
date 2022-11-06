@@ -1,8 +1,6 @@
 package paxos;
 import java.io.Serializable;
 
-import paxos.Paxos.retStatus;
-
 /**
  * Please fill in the data structure you use to represent the response message for each RMI call.
  * Hint: You may need a boolean variable to indicate ack of acceptors and also you may need proposal number and value.
@@ -12,30 +10,32 @@ public class Response implements Serializable {
     static final long serialVersionUID=2L;
     // your data here
     int prop;
-    int max_prop;
+    int max_a_prop;
     int initiator;
-    Object max_val;
-    boolean isDecided;
+    Object max_a_val;
     boolean accept;
+
+    int min_done;
 
     // Your constructor and methods here
 
-    Response(int prop, int max_prop, int initiator, Object max_val, boolean accept, boolean isDecided) {
+    Response(int prop, int max_a_prop, int initiator, Object max_a_val, boolean accept, int min) {
         this.prop = prop;
-        this.max_prop = max_prop;
-        this.initiator = initiator;
-        this.max_val = max_val;
+        this.max_a_prop = max_a_prop;
+        this.max_a_val = max_a_val;
         this.accept = accept;
-        this.isDecided = isDecided;
+        this.min_done = min;
+        this.initiator = initiator;
     }
 
-    Response(int prop, boolean accept, boolean isDecided) {
+    Response(int prop, boolean accept, int min) {
         this.prop = prop;
         this.accept = accept;
-        this.isDecided = isDecided;
+        this.min_done = min;
     }
+
 
     public String toString() {
-        return "*RESPONSE* PROP: " + this.prop + " ISDECIDED:" + this.isDecided + " MAX_PROP: " + this.max_prop + " MAX_INITIATOR: " + this.initiator + " MAX_VAL: " + this.max_val;
+        return "*RESPONSE* PROP: " + this.prop + " MAX_PROP: " + this.max_a_prop + " MAX_INITIATOR: " + this.initiator + " MAX_VAL: " + this.max_a_val;
     }
 }

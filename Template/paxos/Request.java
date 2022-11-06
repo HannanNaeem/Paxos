@@ -15,17 +15,16 @@ public class Request implements Serializable {
     int initiator;
     Object value;
 
+    int min_done;
+
     // Your constructor and methods here
 
-    Request(int seq, int prop, int initiator, Object val) {
+    Request(int seq, int prop, int initiator, Object val, int min) {
         this.seq = seq;
         this.prop = prop;
         this.initiator = initiator;
         this.value = val;
-    }
-
-    Request(Object value) {
-        this.value = value;
+        this.min_done = min;
     }
 
     public String toString() {

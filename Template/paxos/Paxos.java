@@ -1,47 +1,48 @@
 package paxos;
-import java.io.ObjectInputFilter.Status;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
-import javax.sound.midi.Sequence;
-import javax.sql.rowset.serial.SerialArray;
-
-import java.util.ArrayList;
 import java.util.HashMap;
 
 /**
  * This class is the main class you need to implement paxos instances.
  */
 
-class SequenceData {
+class AcceptData {
     Object value;
     int initiator;
     int prop;
-    boolean isDecided;
 
-    SequenceData(Object value, int initiator, int prop, boolean isDecided) {
+    AcceptData(Object value, int initiator, int prop) {
         this.value = value;
         this.initiator = initiator;
         this.prop = prop;
-        this.isDecided = isDecided;
-    }
-
-    public void update(Object value, int initiator, int prop, boolean isDecided) {
-        if (this.isDecided) return;
-
-        this.value = value;
-        this.initiator = initiator;
-        this.prop = prop;
-        this.isDecided = isDecided;
     }
 
     public String toString() {
-        return "*SEQUENCEDATA* Val: " + this.value + " initiator: " + this.initiator + " Prop: " + this.prop;
+        return "*AcceptData* Val: " + this.value + " initiator: " + this.initiator + " Prop: " + this.prop;
     }
 }
+
+class PrepareData {
+    int initiator;
+    int prop;
+
+    PrepareData(int initiator, int prop) {
+        this.initiator = initiator;
+        this.prop = prop;
+    }
+
+
+    public String toString() {
+        return "*PrepareData*" +  " initiator: " + this.initiator + " Prop: " + this.prop;
+    }
+}
+
+
 public class Paxos implements PaxosRMI, Runnable {
 
     ReentrantLock mutex;
@@ -57,16 +58,16 @@ public class Paxos implements PaxosRMI, Runnable {
 
     // Your data here
 
-    HashMap<Integer, SequenceData> SequencePrepMap;
-    HashMap<Integer, SequenceData> SequenceAcceptMap;
+    HashMap<Integer, PrepareData> SequencePrepMap;
+    HashMap<Integer, AcceptData> SequenceAcceptMap;
     HashMap<Integer, retStatus> DecidedValMap;
 
     int seq;
     Object value;
 
-    State d_status;
-    Object d_val;
-
+    int done_val;
+    int[] peer_min;
+    int min_forg;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -84,11 +85,17 @@ public class Paxos implements PaxosRMI, Runnable {
 
         // Your initialization code here
 
-        SequencePrepMap = new HashMap<Integer, SequenceData>(); 
-        SequenceAcceptMap = new HashMap<Integer, SequenceData>(); 
+        SequencePrepMap = new HashMap<Integer, PrepareData>(); 
+        SequenceAcceptMap = new HashMap<Integer, AcceptData>(); 
         DecidedValMap = new HashMap<Integer, retStatus>();
 
+        this.min_forg = -1;
 
+        this.peer_min = new int[peers.length];
+
+        for (int i = 0; i < this.peer_min.length; i++) {
+            this.peer_min[i] = -1;
+        }
 
         // register peers, do not modify this part
         try{
@@ -162,6 +169,30 @@ public class Paxos implements PaxosRMI, Runnable {
         pt.start();
     }
 
+    public int get_proposal_value(int seq_cp) {
+        mutex.lock();
+        PrepareData sp = SequencePrepMap.getOrDefault(seq_cp, null);
+
+        if (sp == null) {
+            sp = new PrepareData(this.me, -1);
+            SequencePrepMap.put(seq_cp, sp);
+        }
+
+        int prop_number = sp.prop + 1;
+        mutex.unlock();
+
+        return prop_number;
+    }
+
+
+    public boolean is_decided(int seq_cp) {
+        mutex.lock();
+        retStatus decidedStatus = DecidedValMap.getOrDefault(seq_cp, null);
+        mutex.unlock();
+        return decidedStatus != null && decidedStatus.state == State.Decided;
+    }
+
+
     @Override
     public void run(){
         //Your code here
@@ -170,153 +201,179 @@ public class Paxos implements PaxosRMI, Runnable {
         Object val_cp = this.value;
         mutex.unlock();
 
-        retStatus decidedStatus = DecidedValMap.getOrDefault(seq_cp, null);
-        
-        while (decidedStatus == null || decidedStatus.state != State.Decided) {
-            mutex.lock();
-            SequenceData s = SequencePrepMap.getOrDefault(seq_cp, null);
-            if (s == null) {
-                s = new SequenceData(null, this.me, -1, false);
-                SequencePrepMap.put(seq_cp, s);
-            }
-            // System.out.println(s);
-            int prop_number = s.prop + 1;
-            mutex.unlock();
-            SequenceData temp_max = new SequenceData(val_cp, this.me, prop_number, false);
+        while (!is_decided(seq_cp)) {
+            
+            // PROPOSE
+            int prop_number = get_proposal_value(seq_cp);
+            int majority = 0;
+            int highest_prop = -1;
+            Object highest_value = val_cp;
 
-            boolean someonDecided = false;
+            AcceptData highest_seen = new AcceptData(highest_value, this.me, highest_prop);
 
-            int count = 0;
             for (int i = 0; i < this.peers.length; i++) {
-                Response res = Call("Prepare", new Request(seq_cp, prop_number, this.me, val_cp), i);
 
-                if (res == null) {
-                    continue;
-                }
+                Response res = Call("Prepare", new Request(seq_cp, prop_number, this.me, val_cp, this.peer_min[this.me]), i);
 
-                someonDecided = res.isDecided || someonDecided;
+                if (res == null) continue;
+
+                updateForgettable(res.min_done, i);
                 
                 if (res.accept == false) {
-                    SequencePrepMap.put(seq_cp, new SequenceData(res.max_val, res.initiator, res.max_prop, res.isDecided));
-                    temp_max.update(res.max_val, res.initiator, res.max_prop, res.isDecided);
+                    SequencePrepMap.put(seq_cp, new PrepareData(res.initiator, res.prop));
                     continue;
                 } else {
-                    // if (this.me == 0) {
-
-                    //     System.out.println(res.max_prop > temp_max.prop);
-                    //     System.out.println(res.max_prop == temp_max.prop);
-                    //     System.out.println(res.max_prop + " " + temp_max.prop);
-                    //     System.out.println(res.initiator > temp_max.initiator);
-                    // }
-                    if (res.max_prop > temp_max.prop || (res.max_prop == temp_max.prop && res.initiator > temp_max.initiator)) {
-                        temp_max.update(res.max_val, res.initiator, res.max_prop, res.isDecided);
-                    }
-                    if (this.me == 0){
-                        // System.out.println(res);
-                        // System.out.println(temp_max);
+                    if (res.max_a_val == null) {
+                    } else {
+                        if (res.max_a_prop > highest_seen.prop) {
+                            highest_seen.initiator = res.initiator;
+                            highest_seen.value = res.max_a_val;
+                            highest_seen.prop = res.max_a_prop;
+                        }
                     }
                 }
-                count++;
+                majority++;
             }
 
-            if (!someonDecided) {
-                if (count <= (this.peers.length/2)) {
-                    continue;
-                }
-    
-                // Here we have some value in temp max > could me mine or someone else's
-                count = 0;
-    
-                // send accept to all for this value with the same proposal number
-    
-                for (int i = 0; i < this.peers.length; i++) {
-                    Response res = Call("Accept", new Request(seq_cp, prop_number, this.me, temp_max.value), i);
-                    if (res == null || !res.accept) {
-                        continue;
-                    }
-                    // System.out.println("Initiator: " + this.me + " PROP no: " + prop_number + " Acceptance from: " + i + " for SEQ: " + seq_cp + " for val: " + temp_max.value);
-                    count++;
-                }
-    
-                if (count <= (this.peers.length/2)) {
-                    continue;
-                }
+            highest_seen.prop = highest_seen.prop == -1 ? prop_number : highest_seen.prop;
+
+            if (highest_seen.prop > prop_number) {
+                PrepareData s = SequencePrepMap.put(seq_cp, new PrepareData(highest_seen.initiator, highest_seen.prop));
             }
 
-            count = 0;
+
+            if (majority <= (this.peers.length/2)) {
+                continue;
+            }
+
+
+            // ACCEPT
+            majority = 0;
+
+            for (int i = 0; i < this.peers.length; i++) {
+                Response res = Call("Accept", new Request(seq_cp, prop_number, this.me, highest_seen.value, this.peer_min[this.me]), i);
+                
+                if (res == null) continue;
+
+                updateForgettable(res.min_done, i);
+
+                if (!res.accept) {
+                    SequencePrepMap.put(seq_cp, new PrepareData(res.initiator, res.prop));
+                    continue;
+                }
+
+                // System.out.println("Initiator: " + this.me + " PROP no: " + prop_number + " Acceptance from: " + i + " for SEQ: " + seq_cp + " for val: " + temp_max.value);
+                majority++;
+            }
+
+            if (majority <= (this.peers.length/2)) {
+                continue;
+            }
+
+            majority = 0;
             // System.out.println("SEQ: " + seq_cp + " VAL: " + val_cp + " ME: " + this.me + " temp_max: " + temp_max.value);
-            // System.out.println(this.me + " DECIDED on val: " + temp_max.value + " seq: " + seq_cp + " LEN: " + this.peers.length);
+            // System.out.println(this.me + " DECIDED on val: " + highest_seen.value + " seq: " + seq_cp + " LEN: " + this.peers.length);
             for (int i = 0; i < this.peers.length; i++) {
                 if (i == this.me) { 
-                    Decide(new Request(seq_cp, prop_number, this.me, temp_max.value));
+                    Decide(new Request(seq_cp, prop_number, this.me, highest_seen.value, this.peer_min[this.me]));
                 }
-                Response res = Call("Decide", new Request(seq_cp, prop_number, this.me, temp_max.value), i);
+                Response res = Call("Decide", new Request(seq_cp, prop_number, this.me, highest_seen.value, this.peer_min[this.me]), i);
 
-                if (res == null) {
-                    continue;
-                }
-                count++;
+                if (res == null) continue;
+
+                updateForgettable(res.min_done, i);
+                majority++;
             }
-
-            mutex.lock();
-            decidedStatus = DecidedValMap.getOrDefault(seq_cp, null);
-            mutex.unlock();
         }
 
+    }
+
+    public void updateForgettable(int min_done, int peer) {
+        mutex.lock();
+        if (this.peer_min[peer] == Math.max(peer_min[peer], min_done)) {
+            mutex.unlock();
+            return;
+        }
+
+        this.peer_min[peer] = Math.max(this.peer_min[peer], min_done);
+
+        this.peer_min[this.me] = Math.max(this.peer_min[peer], this.peer_min[this.me]);
+        
+        int cur_min = this.peer_min[0];
+        for (int i = 0; i < this.peer_min.length; i++){
+            // find -1
+            if (this.peer_min[i] == -1) {
+                mutex.unlock();
+                return;
+            }
+            cur_min = Math.min(cur_min, this.peer_min[i]);
+        }
+        
+        if (cur_min == this.Min()) {
+            mutex.unlock();
+            return;
+        }
+
+        this.min_forg = cur_min - 1;
+        mutex.unlock();
+        // TODO: Forget instances;
     }
 
     // RMI handler
     public Response Prepare(Request req){
         // your code here
+        updateForgettable(req.min_done, req.initiator);
         mutex.lock();
-        SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
-        boolean isDecided = DecidedValMap.getOrDefault(req.seq, new retStatus(State.Pending, null)).state == State.Decided;
+
+        PrepareData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
 
         if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator > prep_max.initiator)) {
-            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
+            AcceptData accept_max = SequenceAcceptMap.getOrDefault(req.seq, null);
 
-            SequenceData accept_max = SequenceAcceptMap.getOrDefault(req.seq, null);
-            mutex.unlock();
+            SequencePrepMap.put(req.seq, new PrepareData(req.initiator, req.prop));
+
             if (accept_max == null) {
-                return new Response(req.prop, -1, -1, null, true, isDecided);
+                mutex.unlock();
+                return new Response(req.prop, -1, req.initiator, null, true, this.peer_min[this.me]);
             }
-            return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value, true, isDecided);
+            
+            mutex.unlock();
+            return new Response(req.prop, accept_max.prop, accept_max.initiator, accept_max.value, true, this.peer_min[this.me]);
         }
         mutex.unlock();
 
         // prepare reject
-        return new Response(req.prop, prep_max.prop, prep_max.initiator, prep_max.value, false, isDecided);
+        return new Response(prep_max.prop, -1, prep_max.initiator, -1, false, this.peer_min[this.me]);
         
     }
     
     public Response Accept(Request req) {
+        updateForgettable(req.min_done, req.initiator);
         mutex.lock();
-        SequenceData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
-        boolean isDecided = DecidedValMap.getOrDefault(req.seq, new retStatus(State.Pending, null)).state == State.Decided;
+        PrepareData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
 
         if (prep_max == null || (req.prop > prep_max.prop) || (req.prop == prep_max.prop && req.initiator >= prep_max.initiator)) {
-            SequencePrepMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
-            SequenceAcceptMap.put(req.seq, new SequenceData(req.value, req.initiator, req.prop, false));
+            SequencePrepMap.put(req.seq, new PrepareData(req.initiator, req.prop));
+            SequenceAcceptMap.put(req.seq, new AcceptData(req.value, req.initiator, req.prop));
             mutex.unlock();
-            return new Response(req.prop, true, isDecided);
+            return new Response(req.prop, true, this.peer_min[this.me]);
         }
         // accept_reject
         mutex.unlock();
-        return new Response(req.prop, false, isDecided);
+        return new Response(prep_max.prop, -1, prep_max.initiator, -1, false, this.peer_min[this.me]);
     }
 
     public Response Decide(Request req){
         // your code here
-        
+        updateForgettable(req.min_done, req.initiator);
         mutex.lock();
         if (!DecidedValMap.containsKey(req.seq)) {
-            // System.out.println("Deciding: " + req.value + " on SEQ: " + req.seq + " Me: " + this.me);
             DecidedValMap.put(req.seq, new retStatus(State.Decided, req.value));
         }
         mutex.unlock();
 
         // add to dict
-        return new Response(req.prop, true, true);
+        return new Response(req.prop, true, this.peer_min[this.me]);
     }
 
     /**
@@ -327,6 +384,7 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public void Done(int seq) {
         // Your code here
+        this.peer_min[this.me] = Math.max(seq, this.peer_min[this.me]);
     }
 
 
@@ -337,7 +395,7 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Max(){
         // Your code here
-        return 10;
+        return -1;
     }
 
     /**
@@ -370,7 +428,7 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Min(){
         // Your code here
-        return 1;
+        return min_forg + 1;
     }
 
 
