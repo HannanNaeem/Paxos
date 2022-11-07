@@ -10,7 +10,16 @@ public class Request implements Serializable {
     static final long serialVersionUID=11L;
     // Your data here
 
+    Op kv_obj;
 
     // Your constructor and methods here
+
+    Request(Op obj) {
+        this.kv_obj = obj;
+    }
+
+    public String toString() {
+        return kv_obj.toString();
+    }
 
 }

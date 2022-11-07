@@ -10,6 +10,13 @@ public class Response implements Serializable {
     static final long serialVersionUID=22L;
     // your data here
 
+    Op kv_obj;
 
     // Your constructor and methods here
+
+    Response() {}
+
+    Response(Op obj) {
+        kv_obj = obj;
+    }
 }

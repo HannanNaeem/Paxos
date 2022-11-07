@@ -69,11 +69,17 @@ public class Paxos implements PaxosRMI, Runnable {
     int[] peer_min;
     int min_forg;
 
+    int max_seq_seen;
+
     /**
      * Call the constructor to create a Paxos peer.
      * The hostnames of all the Paxos peers (including this one)
      * are in peers[]. The ports are in ports[].
      */
+
+     public HashMap<Integer, retStatus> getD() {
+        return DecidedValMap;
+     }
     public Paxos(int me, String[] peers, int[] ports){
 
         this.me = me;
@@ -90,6 +96,8 @@ public class Paxos implements PaxosRMI, Runnable {
         DecidedValMap = new HashMap<Integer, retStatus>();
 
         this.min_forg = -1;
+
+        this.max_seq_seen = -1;
 
         this.peer_min = new int[peers.length];
 
@@ -286,6 +294,10 @@ public class Paxos implements PaxosRMI, Runnable {
             }
         }
 
+        try {
+            Thread.sleep((long)((Math.random() * 300) + 50));
+        } catch (Exception e) {}
+
     }
 
     public void updateForgettable(int min_done, int peer) {
@@ -322,8 +334,11 @@ public class Paxos implements PaxosRMI, Runnable {
     // RMI handler
     public Response Prepare(Request req){
         // your code here
+
         updateForgettable(req.min_done, req.initiator);
         mutex.lock();
+
+        this.max_seq_seen = Math.max(this.max_seq_seen, req.seq);
 
         PrepareData prep_max = SequencePrepMap.getOrDefault(req.seq, null);
 
@@ -368,6 +383,7 @@ public class Paxos implements PaxosRMI, Runnable {
         updateForgettable(req.min_done, req.initiator);
         mutex.lock();
         if (!DecidedValMap.containsKey(req.seq)) {
+            System.out.println("DECIDED -- ME: " + this.me + " SEQ: " + req.seq + " Value: " + req.value);
             DecidedValMap.put(req.seq, new retStatus(State.Decided, req.value));
         }
         mutex.unlock();
@@ -395,7 +411,7 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Max(){
         // Your code here
-        return -1;
+        return this.max_seq_seen;
     }
 
     /**

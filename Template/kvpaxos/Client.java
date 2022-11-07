@@ -2,6 +2,7 @@ package kvpaxos;
 
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.util.UUID;
 
 
 public class Client {
@@ -10,11 +11,16 @@ public class Client {
 
     // Your data here
 
+    int client_seq;
+    String me;
 
     public Client(String[] servers, int[] ports){
         this.servers = servers;
         this.ports = ports;
         // Your initialization code here
+        
+        this.me = UUID.randomUUID().toString();
+        this.client_seq = 0;
     }
 
     /**
@@ -50,12 +56,38 @@ public class Client {
 
     // RMI handlers
     public Integer Get(String key){
-        // Your code here
+        Op put_op = new Op("Get", client_seq++, key, -1, this.me);
 
+        boolean done = false;
+        for (int i = 0; i < this.servers.length && !done; i++) {
+            Response res = Call("Get", new Request(put_op), i);
+
+            if (res == null) continue;
+
+            Op res_value = res.kv_obj;
+
+            return res_value.value;
+        }
+
+        return null;
     }
 
     public boolean Put(String key, Integer value){
         // Your code here
+
+        Op put_op = new Op("Put", client_seq++, key, value, this.me);
+
+        boolean done = false;
+        for (int i = 0; i < this.servers.length && !done; i++) {
+            Response res = Call("Put", new Request(put_op), i);
+
+            if (res == null) continue;
+
+            done = true;
+        }
+
+        return done;
+        
     }
 
 }
