@@ -187,9 +187,15 @@ public class Paxos implements PaxosRMI, Runnable {
         mutex.lock();
         int seq_cp = this.seq;
         Object val_cp = this.value;
+
+        if (seq_cp < this.Min()) return;
+
         mutex.unlock();
 
         while (!is_decided(seq_cp) && !isDead()) {
+            try {
+                Thread.sleep((long)((Math.random() * 300) + 50));
+            } catch (Exception e) {}
             
             // PROPOSE
             int prop_number = get_proposal_value(seq_cp);
@@ -267,11 +273,6 @@ public class Paxos implements PaxosRMI, Runnable {
                 majority++;
             }
         }
-
-        try {
-            Thread.sleep((long)((Math.random() * 300) + 50));
-        } catch (Exception e) {}
-
     }
 
     public void updateForgettable(int min_done, int peer) {
@@ -282,8 +283,6 @@ public class Paxos implements PaxosRMI, Runnable {
         }
 
         this.peer_min[peer] = Math.max(this.peer_min[peer], min_done);
-
-        this.peer_min[this.me] = Math.max(this.peer_min[peer], this.peer_min[this.me]);
         
         int cur_min = this.peer_min[0];
         for (int i = 0; i < this.peer_min.length; i++){
@@ -294,15 +293,25 @@ public class Paxos implements PaxosRMI, Runnable {
             }
             cur_min = Math.min(cur_min, this.peer_min[i]);
         }
-        
-        if (cur_min == this.Min()) {
-            mutex.unlock();
-            return;
+
+        this.min_forg = cur_min;
+
+        // Forget
+
+
+        for (int seq = this.min_forg; seq >= 0 ; seq--) {
+            if (SequenceMap.containsKey(seq)) {
+                retStatus rs = DecidedValMap.get(seq);
+                rs.state = State.Forgotten;
+                DecidedValMap.put(seq, rs);
+
+                SequenceMap.remove(seq);
+            } else {
+                break;
+            }
         }
 
-        this.min_forg = cur_min - 1;
         mutex.unlock();
-        // TODO: Forget instances;
     }
 
     // RMI handler
