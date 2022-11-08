@@ -58,10 +58,11 @@ public class KVPaxosTest {
         for(int i = 0; i < npaxos; i++){
             kva[i] = new Server(peers, ports, i);
         }
+        
+        Client ck = new Client(peers, ports);
 
         ports[0] = 1;
 
-        Client ck = new Client(peers, ports);
         System.out.println("Test: Basic put/get ...");
         ck.Put("app", 6);
         ck.Put("app", 7);
@@ -71,32 +72,47 @@ public class KVPaxosTest {
 
         ck.Put("a", 70);
         check(ck, "a", 70);
-
-
-        ports[0] = 1100;
-
-        System.out.println("ONE");
-        for (int k : kva[1].px.getD().keySet()) {
-            System.out.println(Op.class.cast(kva[1].px.getD().get(k).v));
-        }
         
-        System.out.println("Zero");
-        for (int k : kva[0].px.getD().keySet()) {
-            System.out.println(Op.class.cast(kva[0].px.getD().get(k).v));
+        for(int i = 0; i < npaxos; i++){
+            kva[i].Get(
+                new Request(
+                    new Op(
+                        "Get",
+                        1,
+                        "app",
+                        -1,
+                        "abc")));
         }
 
-        Client ck2 = new Client(peers, ports);
+        for(int i = 0; i < npaxos; i++){
+            System.out.println(kva[i].px.Min());
+        }
 
-        ck2.Put("temp", 10);
+
+        // ports[0] = 1100;
+
+        // System.out.println("ONE");
+        // for (int k : kva[1].px.getD().keySet()) {
+        //     System.out.println(Op.class.cast(kva[1].px.getD().get(k).v));
+        // }
         
-        System.out.println("ONE");
-        for (int k : kva[1].px.getD().keySet()) {
-            System.out.println(Op.class.cast(kva[1].px.getD().get(k).v));
-        }
-        System.out.println("ZERO");
-        for (int k : kva[0].px.getD().keySet()) {
-            System.out.println(Op.class.cast(kva[0].px.getD().get(k).v));
-        }
+        // System.out.println("ZERO");
+        // for (int k : kva[0].px.getD().keySet()) {
+        //     System.out.println(Op.class.cast(kva[0].px.getD().get(k).v));
+        // }
+
+        // Client ck2 = new Client(peers, ports);
+
+        // ck2.Put("temp", 10);
+        
+        // System.out.println("ONE");
+        // for (int k : kva[1].px.getD().keySet()) {
+        //     System.out.println(Op.class.cast(kva[1].px.getD().get(k).v));
+        // }
+        // System.out.println("ZERO");
+        // for (int k : kva[0].px.getD().keySet()) {
+        //     System.out.println(Op.class.cast(kva[0].px.getD().get(k).v));
+        // }
 
         System.out.println("... Passed");
 

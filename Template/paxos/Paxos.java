@@ -297,7 +297,7 @@ public class Paxos implements PaxosRMI, Runnable {
         this.min_forg = cur_min;
 
         // Forget
-
+        System.out.println("Forgetting! " + this.me);
 
         for (int seq = this.min_forg; seq >= 0 ; seq--) {
             if (SequenceMap.containsKey(seq)) {

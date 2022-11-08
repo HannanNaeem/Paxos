@@ -56,17 +56,15 @@ public class Client {
 
     // RMI handlers
     public Integer Get(String key){
-        Op put_op = new Op("Get", client_seq++, key, -1, this.me);
+        Op get_op = new Op("Get", client_seq++, key, -1, this.me);
 
         boolean done = false;
         for (int i = 0; i < this.servers.length && !done; i++) {
-            Response res = Call("Get", new Request(put_op), i);
+            Response res = Call("Get", new Request(get_op), i);
 
             if (res == null) continue;
 
-            Op res_value = res.kv_obj;
-
-            return res_value.value;
+            return res.value;
         }
 
         return null;

@@ -24,7 +24,9 @@ public class Server implements KVPaxosRMI {
     // Your definitions here
 
     HashMap<String, Integer> client_map;
-
+    int local_max_seq;
+    HashMap<String, Integer> KeyValMap;
+    
     public Server(String[] servers, int[] ports, int me){
         this.me = me;
         this.servers = servers;
@@ -32,10 +34,11 @@ public class Server implements KVPaxosRMI {
         this.mutex = new ReentrantLock();
         this.px = new Paxos(me, servers, ports);
         // Your initialization code here
-
+        
         client_map = new HashMap<String, Integer>();
-
-
+        local_max_seq = -1;
+        KeyValMap = new HashMap<String, Integer>();
+        
         try{
             System.setProperty("java.rmi.server.hostname", this.servers[this.me]);
             registry = LocateRegistry.getRegistry(this.ports[this.me]);
@@ -46,9 +49,34 @@ public class Server implements KVPaxosRMI {
         }
     }
 
+    public void updateDict() {
+        mutex.lock();
+        int px_max = this.px.Max();
+        mutex.unlock();
+
+        for (int i = local_max_seq + 1; i <= px_max; i++) {
+            Paxos.retStatus ret = this.px.Status(i);
+            addSingleValue(ret);
+        }
+        local_max_seq = px_max;
+        this.px.Done(local_max_seq);
+    }
+
+    public void addSingleValue(Paxos.retStatus ret) {
+        Op kv_obj = Op.class.cast(ret.v);
+        mutex.lock();
+        if (kv_obj.op.equals("Put")) {
+            KeyValMap.put(kv_obj.key, kv_obj.value);
+            int client_seq_old = client_map.getOrDefault(kv_obj.client_id, -1);
+            client_map.put(kv_obj.client_id, Math.max(client_seq_old, kv_obj.ClientSeq));
+        }
+        mutex.unlock();
+    }
 
     // RMI handlers
     public Response Get(Request req){
+        updateDict();
+
         Op kv_obj = req.kv_obj;
         int client_seq_seen = client_map.getOrDefault(kv_obj.client_id, -1);
 
@@ -59,7 +87,8 @@ public class Server implements KVPaxosRMI {
 
         client_map.put(kv_obj.client_id, kv_obj.ClientSeq);
 
-        int seq = this.px.Max() + 1;
+        int seq = local_max_seq + 1;
+
         while (true) {
             this.px.Start(seq, kv_obj);
     
@@ -67,28 +96,23 @@ public class Server implements KVPaxosRMI {
     
             Paxos.retStatus ret = this.px.Status(seq);
             
-            // TEST
+            addSingleValue(ret);
+
             if (kv_obj.equals(Op.class.cast(ret.v))) 
-                break;
+                break;  
             
-            seq = this.px.Max() + 1;
+            seq++;
         }
 
-        for (int i = seq-1; i >= 0; i--) {
-            Paxos.retStatus ret = this.px.Status(i);
-            Op res = Op.class.cast(ret.v);
-
-            if (res.op.equals("Put") && res.key.equals(kv_obj.key)) {
-                return new Response(res);
-            }
-        }
-
-        return null;
-
+        local_max_seq = seq;
+        this.px.Done(local_max_seq);
+        
+        return new Response(KeyValMap.getOrDefault(kv_obj.key, null));
     }
 
     public Response Put(Request req){
-        // Your code here
+        updateDict();
+
         Op kv_obj = req.kv_obj;
         int client_seq_seen = client_map.getOrDefault(kv_obj.client_id, -1);
 
@@ -99,18 +123,27 @@ public class Server implements KVPaxosRMI {
 
         client_map.put(kv_obj.client_id, kv_obj.ClientSeq);
 
+        int seq = local_max_seq + 1;
+
         while (true) {
-            int seq = this.px.Max() + 1;
             this.px.Start(seq, kv_obj);
     
             wait(seq); 
     
             Paxos.retStatus ret = this.px.Status(seq);
-            
-            // TEST
-            if (kv_obj.equals(Op.class.cast(ret.v))) 
-                return new Response();
+
+            addSingleValue(ret);
+
+            if (kv_obj.equals(Op.class.cast(ret.v)))
+                break;
+
+            seq++;
         }
+
+        local_max_seq = seq;
+        this.px.Done(local_max_seq);
+
+        return new Response();
     }
 
     public Op wait(int seq) {
